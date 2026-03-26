@@ -50,13 +50,15 @@ class MainActivity : AppCompatActivity() {
         })
 
         btnStart.setOnClickListener {
-            sharedPref.edit().putBoolean(KEY_OCR_ENABLED, true).apply()
-            Toast.makeText(this, "Lecture activée", Toast.LENGTH_SHORT).show()
+            val intent = Intent(this, MangaReaderService::class.java)
+            startService(intent)
+            Toast.makeText(this, "Service démarré", Toast.LENGTH_SHORT).show()
         }
 
         btnStop.setOnClickListener {
-            sharedPref.edit().putBoolean(KEY_OCR_ENABLED, false).apply()
-            Toast.makeText(this, "Lecture désactivée", Toast.LENGTH_SHORT).show()
+            val intent = Intent(this, MangaReaderService::class.java)
+            stopService(intent)
+            Toast.makeText(this, "Service arrêté", Toast.LENGTH_SHORT).show()
         }
 
         btnColor.setOnClickListener {
