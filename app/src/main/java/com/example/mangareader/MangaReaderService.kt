@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -29,6 +30,10 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
     private var tts: TextToSpeech? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var lastScrollTime = 0L
+    // Pour éviter la répétition immédiate de la même phrase
+    private var lastSpokenText: String? = null
+    private var lastSpokenTime: Long = 0
+    private val REPEAT_DELAY_MS = 3000 // 3 secondes
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
@@ -220,15 +225,52 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
         val image = InputImage.fromBitmap(bitmap, 0)
         recognizer.process(image)
             .addOnSuccessListener { visionText ->
-                if (visionText.text.isNotBlank()) {
-                    tts?.speak(visionText.text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+                val rawText = visionText.text.trim()
+                if (rawText.isNotBlank()) {
+                    val processedText = preprocessText(rawText)
+                    speakIfNotDuplicate(processedText)
                 }
             }
     }
 
+    /** Nettoyage simple du texte OCR : suppression des caractères parasites, ajout de pauses. */
+    private fun preprocessText(text: String): String {
+        // Remplacer les sauts de ligne multiples par un espace
+        var cleaned = text.replace(Regex("\\s+"), " ")
+        // Supprimer les caractères spéciaux répétés (ex: "...", "!!!")
+        cleaned = cleaned.replace(Regex("\\.{2,}"), "…")
+        cleaned = cleaned.replace(Regex("!{2,}"), "!")
+        cleaned = cleaned.replace(Regex("\\?{2,}"), "?")
+        // Ajouter une légère pause après les points, virgules, points-virgules
+        cleaned = cleaned.replace(Regex("([.!?])\\s*"), "$1 ")
+        // Retourner le texte nettoyé
+        return cleaned.trim()
+    }
+
+    /** Parle uniquement si le texte n'est pas identique au dernier énoncé récemment. */
+    private fun speakIfNotDuplicate(text: String) {
+        val now = System.currentTimeMillis()
+        if (lastSpokenText == text && now - lastSpokenTime < REPEAT_DELAY_MS) {
+            // Ignorer la répétition immédiate
+            return
+        }
+        lastSpokenText = text
+        lastSpokenTime = now
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+    }
+
     override fun onInterrupt() {}
     override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) tts?.language = Locale.FRENCH
+        if (status == TextToSpeech.SUCCESS) {
+            tts?.language = Locale.FRENCH
+            // Essayer de choisir une voix de haute qualité si disponible
+            val voices = tts?.voices
+            val frenchVoice = voices?.firstOrNull { it.locale.language == Locale.FRENCH.language }
+            frenchVoice?.let { tts?.setVoice(it) }
+            // Ajuster vitesse et hauteur de voix (valeurs par défaut : 1.0f)
+            tts?.setSpeechRate(0.9f)  // Légèrement plus lent pour meilleure compréhension
+            tts?.setPitch(1.0f)       // Pitch neutre
+        }
     }
     
     override fun onDestroy() {
