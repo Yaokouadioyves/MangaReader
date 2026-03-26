@@ -15,6 +15,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -32,6 +33,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Locale
 import kotlin.math.max
+import org.json.JSONObject
 
 class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
     private var sharedPref: SharedPreferences? = null
@@ -39,6 +41,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     private val KEY_COLOR = "rect_color"
     private val KEY_ALPHA = "rect_alpha"
     private val KEY_OCR_ENABLED = "ocr_enabled"
+    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val GEMINI_API_KEY = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
     private val REPEAT_DELAY_MS = 5000 // 5 seconds to avoid repetition
     private var lastSpokenText: String? = null
@@ -277,38 +280,35 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 connection.doOutput = true
 
-                val jsonBody = org.json.JSONObject()
+                val jsonBody = JSONObject()
                 
-                val inputObj = org.json.JSONObject()
+                val inputObj = JSONObject()
                 inputObj.put("text", text)
                 jsonBody.put("input", inputObj)
                 
-                val voiceObj = org.json.JSONObject()
+                val voiceObj = JSONObject()
                 voiceObj.put("languageCode", "fr-FR")
-                voiceObj.put("name", "Zephyr") // Using a French voice? Actually Zephyr is English. We need a French voice.
-                // Let's check available voices for Gemini TTS. For now, we'll use Zephyr as placeholder.
-                // Ideally we should use a French voice like "fr-FR-Neural2-A" but that's Google Cloud TTS.
-                // Since Gemini TTS may have different voice names, we'll use "Zephyr" for testing.
+                voiceObj.put("name", "Zephyr") // Using a placeholder voice name; actual voice selection may vary per model
                 jsonBody.put("voice", voiceObj)
                 
-                val configObj = org.json.JSONObject()
-                configObj.put("responseModalities", org.json.JSONArray().put("AUDIO"))
-                val speechConfigObj = org.json.JSONObject()
-                val voiceConfigObj = org.json.JSONObject()
-                val prebuiltVoiceConfigObj = org.json.JSONObject()
+                val configObj = JSONObject()
+                configObj.put("responseModalities", JSONArray().put("AUDIO"))
+                val speechConfigObj = JSONObject()
+                val voiceConfigObj = JSONObject()
+                val prebuiltVoiceConfigObj = JSONObject()
                 prebuiltVoiceConfigObj.put("voiceName", "Zephyr")
                 voiceConfigObj.put("prebuiltVoiceConfig", prebuiltVoiceConfigObj)
                 speechConfigObj.put("voiceConfig", voiceConfigObj)
                 configObj.put("speechConfig", speechConfigObj)
                 jsonBody.put("generationConfig", configObj)
 
-                val outputBytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
+                val outputBytes = jsonBody.toString().getBytes(Charsets.UTF_8)
                 connection.outputStream.write(outputBytes)
                 connection.outputStream.close()
 
                 if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
                     val response = connection.inputStream.bufferedReader().use { it.readText() }
-                    val jsonResponse = org.json.JSONObject(response)
+                    val jsonResponse = JSONObject(response)
                     // Parse response
                     val candidates = jsonResponse.getJSONArray("candidates")
                     if (candidates.length() > 0) {
