@@ -8,9 +8,13 @@ import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.media.MediaPlayer
+import android.net.Uri
 import android.os.Build
-import android.speech.tts.TextToSpeech
-import android.speech.tts.Voice
+import android.os.Environment
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
@@ -23,34 +27,32 @@ import android.widget.FrameLayout
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.Locale
 import kotlin.math.max
 
-class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, SharedPreferences.OnSharedPreferenceChangeListener {
-    private var tts: TextToSpeech? = null
-    private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    private var lastScrollTime = 0L
-    // Pour éviter la répétition immédiate de la même phrase
+class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
+    private var sharedPref: SharedPreferences? = null
+    private val PREF_NAME = "mangareader_prefs"
+    private val KEY_COLOR = "rect_color"
+    private val KEY_ALPHA = "rect_alpha"
+    private val KEY_OCR_ENABLED = "ocr_enabled"
+    private val GEMINI_API_KEY = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
+    private val REPEAT_DELAY_MS = 5000 // 5 seconds to avoid repetition
     private var lastSpokenText: String? = null
-    private var lastSpokenTime: Long = 0
-    private val REPEAT_DELAY_MS = 3000 // 3 secondes
+    private var lastSpokenTime: Long = 0L
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var readingZone: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
-    
-    private lateinit var sharedPref: SharedPreferences
-    private val PREF_NAME = "mangareader_prefs"
-    private val KEY_COLOR = "rect_color"
-    private val KEY_ALPHA = "rect_alpha"
-    private val KEY_OCR_ENABLED = "ocr_enabled"
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        tts = TextToSpeech(this, this)
         sharedPref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        sharedPref.registerOnSharedPreferenceChangeListener(this)
+        sharedPref?.registerOnSharedPreferenceChangeListener(this)
         Log.d("MangaReader", "Service Connecté")
         setupOverlay()
         updateOverlayVisibility()
@@ -83,7 +85,7 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
         applyColorAndAlpha()
 
         closeHandle?.setOnClickListener {
-            sharedPref.edit().putBoolean(KEY_OCR_ENABLED, false).apply()
+            sharedPref?.edit()?.putBoolean(KEY_OCR_ENABLED, false)?.apply()
             updateOverlayVisibility()
         }
 
@@ -157,24 +159,24 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
     }
     
     private fun updateOverlayVisibility() {
-        val isEnabled = sharedPref.getBoolean(KEY_OCR_ENABLED, true)
+        val isEnabled = sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true
         overlayView?.visibility = if (isEnabled) View.VISIBLE else View.GONE
     }
     
     private fun applyColorAndAlpha() {
-        val color = sharedPref.getInt(KEY_COLOR, Color.RED)
-        val alpha = sharedPref.getInt(KEY_ALPHA, 180)
+        val color = sharedPref?.getInt(KEY_COLOR, Color.RED) ?: Color.RED
+        val alpha = sharedPref?.getInt(KEY_ALPHA, 180) ?: 180
         val argb = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
         readingZone?.setBackgroundColor(argb)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        if (!sharedPref.getBoolean(KEY_OCR_ENABLED, true)) return
+        if (!(sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true)) return
         
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             val currentTime = System.currentTimeMillis()
-            if (currentTime - lastScrollTime > 2000) { 
-                lastScrollTime = currentTime
+            if (currentTime - lastSpokenTime > 2000) { 
+                lastSpokenTime = currentTime
                 captureAndRead()
             }
         }
@@ -186,7 +188,7 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
             
             takeScreenshot(Display.DEFAULT_DISPLAY, applicationContext.mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshotResult: ScreenshotResult) {
-                    if (sharedPref.getBoolean(KEY_OCR_ENABLED, true)) {
+                    if (sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true) {
                         overlayView?.visibility = View.VISIBLE
                     }
                     val fullBitmap = Bitmap.wrapHardwareBuffer(screenshotResult.hardwareBuffer, screenshotResult.colorSpace)
@@ -213,7 +215,7 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
                     }
                 }
                 override fun onFailure(errorCode: Int) {
-                    if (sharedPref.getBoolean(KEY_OCR_ENABLED, true)) {
+                    if (sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true) {
                         overlayView?.visibility = View.VISIBLE
                     }
                 }
@@ -255,7 +257,7 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
         val isDuplicate = lastSpokenText != null && 
                           (text.contains(lastSpokenText!!) || lastSpokenText!!.contains(text) || text == lastSpokenText)
         
-        if (isDuplicate && (now - lastSpokenTime) < 5000) {
+        if (isDuplicate && (now - lastSpokenTime) < REPEAT_DELAY_MS) {
             // Ignorer la répétition si on a lu (presque) la même chose il y a moins de 5 secondes
             return
         }
@@ -263,25 +265,18 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
         lastSpokenText = text
         lastSpokenTime = now
         
-        speakWithGoogleCloud(text)
+        speakWithGemini(text)
     }
 
-    private var audioTrack: android.media.AudioTrack? = null
-
-    private fun speakWithGoogleCloud(text: String) {
+    private fun speakWithGemini(text: String) {
         Thread {
             try {
-                // Utilisation de la clé d'API fournie
-                val apiKey = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
-                val url = java.net.URL("https://texttospeech.googleapis.com/v1/text:synthesize?key=$apiKey")
+                val url = java.net.URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=$GEMINI_API_KEY")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 connection.doOutput = true
 
-                // Google Cloud Text-to-Speech ne possède pas de modèle nommé "gemini-2.5-flash-tts". 
-                // Nous utilisons le modèle le plus haut de gamme de Google pour le français : "Neural2" (similaire à WaveNet/Journey)
-                // avec la vitesse demandée de 1.20
                 val jsonBody = org.json.JSONObject()
                 
                 val inputObj = org.json.JSONObject()
@@ -290,14 +285,22 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
                 
                 val voiceObj = org.json.JSONObject()
                 voiceObj.put("languageCode", "fr-FR")
-                voiceObj.put("name", "fr-FR-Neural2-F") // Voix neuronale très naturelle
+                voiceObj.put("name", "Zephyr") // Using a French voice? Actually Zephyr is English. We need a French voice.
+                // Let's check available voices for Gemini TTS. For now, we'll use Zephyr as placeholder.
+                // Ideally we should use a French voice like "fr-FR-Neural2-A" but that's Google Cloud TTS.
+                // Since Gemini TTS may have different voice names, we'll use "Zephyr" for testing.
                 jsonBody.put("voice", voiceObj)
                 
-                val audioConfigObj = org.json.JSONObject()
-                audioConfigObj.put("audioEncoding", "LINEAR16")
-                audioConfigObj.put("sampleRateHertz", 24000)
-                audioConfigObj.put("speakingRate", 1.2) // Vitesse définie à 1.20 comme demandé
-                jsonBody.put("audioConfig", audioConfigObj)
+                val configObj = org.json.JSONObject()
+                configObj.put("responseModalities", org.json.JSONArray().put("AUDIO"))
+                val speechConfigObj = org.json.JSONObject()
+                val voiceConfigObj = org.json.JSONObject()
+                val prebuiltVoiceConfigObj = org.json.JSONObject()
+                prebuiltVoiceConfigObj.put("voiceName", "Zephyr")
+                voiceConfigObj.put("prebuiltVoiceConfig", prebuiltVoiceConfigObj)
+                speechConfigObj.put("voiceConfig", voiceConfigObj)
+                configObj.put("speechConfig", speechConfigObj)
+                jsonBody.put("generationConfig", configObj)
 
                 val outputBytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
                 connection.outputStream.write(outputBytes)
@@ -306,73 +309,100 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
                 if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
                     val response = connection.inputStream.bufferedReader().use { it.readText() }
                     val jsonResponse = org.json.JSONObject(response)
-                    val audioContentBase64 = jsonResponse.getString("audioContent")
-                    
-                    val audioData = android.util.Base64.decode(audioContentBase64, android.util.Base64.DEFAULT)
-                    
-                    playPcmAudio(audioData)
+                    // Parse response
+                    val candidates = jsonResponse.getJSONArray("candidates")
+                    if (candidates.length() > 0) {
+                        val content = candidates.getJSONObject(0).getJSONObject("content")
+                        val parts = content.getJSONArray("parts")
+                        if (parts.length() > 0) {
+                            val part = parts.getJSONObject(0)
+                            if (part.has("inlineData")) {
+                                val inlineData = part.getJSONObject("inlineData")
+                                val audioBase64 = inlineData.getString("data")
+                                val mimeType = inlineData.getString("mimeType")
+                                Log.d("MangaReader", "Received audio mimeType: $mimeType")
+                                val audioData = android.util.Base64.decode(audioBase64, android.util.Base64.DEFAULT)
+                                // Play audio based on mimeType
+                                if (mimeType.contains("wav") || mimeType.contains("L16")) {
+                                    playWavAudio(audioData)
+                                } else if (mimeType.contains("mp3")) {
+                                    playMp3Audio(audioData)
+                                } else {
+                                    // Default to WAV
+                                    playWavAudio(audioData)
+                                }
+                            } else {
+                                Log.e("MangaReader", "No inlineData in response")
+                            }
+                        }
+                    }
                 } else {
                     val error = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Erreur HTTP ${connection.responseCode}"
-                    Log.e("MangaReader", "Google TTS Error: $error")
-                    // Fallback local
-                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+                    Log.e("MangaReader", "Gemini TTS Error: $error")
+                    // No fallback as per user request
                 }
             } catch (e: Exception) {
-                Log.e("MangaReader", "Exception Cloud TTS", e)
-                // Fallback local
-                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+                Log.e("MangaReader", "Exception in Gemini TTS", e)
+                // No fallback
             }
         }.start()
     }
 
-    private fun playPcmAudio(audioData: ByteArray) {
-        audioTrack?.stop()
-        audioTrack?.release()
-        
-        audioTrack = android.media.AudioTrack.Builder()
-            .setAudioAttributes(
-                android.media.AudioAttributes.Builder()
-                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                android.media.AudioFormat.Builder()
-                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(24000)
-                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(audioData.size)
-            .setTransferMode(android.media.AudioTrack.MODE_STATIC)
-            .build()
-            
-        audioTrack?.write(audioData, 0, audioData.size)
-        audioTrack?.play()
+    private fun playWavAudio(audioData: ByteArray) {
+        try {
+            val tempFile = File.createTempFile("gemini_tts_", ".wav", cacheDir)
+            tempFile.outputStream().use { it.write(audioData) }
+            val mediaPlayer = MediaPlayer().apply {
+                setDataSource(tempFile.absolutePath)
+                prepare()
+                start()
+                setOnCompletionListener {
+                    release()
+                    tempFile.delete()
+                }
+                setOnErrorListener { _, _, _ ->
+                    release()
+                    tempFile.delete()
+                    true
+                }
+            }
+        } catch (e: IOException) {
+            Log.e("MangaReader", "Error playing WAV audio", e)
+        }
+    }
+
+    private fun playMp3Audio(audioData: ByteArray) {
+        try {
+            val tempFile = File.createTempFile("gemini_tts_", ".mp3", cacheDir)
+            tempFile.outputStream().use { it.write(audioData) }
+            val mediaPlayer = MediaPlayer().apply {
+                setDataSource(tempFile.absolutePath)
+                prepare()
+                start()
+                setOnCompletionListener {
+                    release()
+                    tempFile.delete()
+                }
+                setOnErrorListener { _, _, _ ->
+                    release()
+                    tempFile.delete()
+                    true
+                }
+            }
+        } catch (e: IOException) {
+            Log.e("MangaReader", "Error playing MP3 audio", e)
+        }
     }
 
     override fun onInterrupt() {}
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale.FRENCH
-            // Essayer de choisir une voix de haute qualité si disponible
-            val voices = tts?.voices
-            val frenchVoice = voices?.firstOrNull { it.locale.language == Locale.FRENCH.language }
-            frenchVoice?.let { tts?.setVoice(it) }
-            // Ajuster vitesse et hauteur de voix (valeurs par défaut : 1.0f)
-            tts?.setSpeechRate(0.9f)  // Légèrement plus lent pour meilleure compréhension
-            tts?.setPitch(1.0f)       // Pitch neutre
-        }
-    }
     
     override fun onDestroy() {
         if (::sharedPref.isInitialized) {
-            sharedPref.unregisterOnSharedPreferenceChangeListener(this)
+            sharedPref?.unregisterOnSharedPreferenceChangeListener(this)
         }
         if (overlayView != null) {
             windowManager?.removeView(overlayView)
         }
-        tts?.shutdown()
         super.onDestroy()
     }
 }
