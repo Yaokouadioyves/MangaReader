@@ -263,8 +263,92 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
         lastSpokenText = text
         lastSpokenTime = now
         
-        // Utilisation des ponctuations ajoutées au prétraitement pour forcer des pauses naturelles par le TTS
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+        speakWithGoogleCloud(text)
+    }
+
+    private var audioTrack: android.media.AudioTrack? = null
+
+    private fun speakWithGoogleCloud(text: String) {
+        Thread {
+            try {
+                // Utilisation de la clé d'API fournie
+                val apiKey = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
+                val url = java.net.URL("https://texttospeech.googleapis.com/v1/text:synthesize?key=$apiKey")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.doOutput = true
+
+                // Google Cloud Text-to-Speech ne possède pas de modèle nommé "gemini-2.5-flash-tts". 
+                // Nous utilisons le modèle le plus haut de gamme de Google pour le français : "Neural2" (similaire à WaveNet/Journey)
+                // avec la vitesse demandée de 1.20
+                val jsonBody = org.json.JSONObject()
+                
+                val inputObj = org.json.JSONObject()
+                inputObj.put("text", text)
+                jsonBody.put("input", inputObj)
+                
+                val voiceObj = org.json.JSONObject()
+                voiceObj.put("languageCode", "fr-FR")
+                voiceObj.put("name", "fr-FR-Neural2-F") // Voix neuronale très naturelle
+                jsonBody.put("voice", voiceObj)
+                
+                val audioConfigObj = org.json.JSONObject()
+                audioConfigObj.put("audioEncoding", "LINEAR16")
+                audioConfigObj.put("sampleRateHertz", 24000)
+                audioConfigObj.put("speakingRate", 1.2) // Vitesse définie à 1.20 comme demandé
+                jsonBody.put("audioConfig", audioConfigObj)
+
+                val outputBytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
+                connection.outputStream.write(outputBytes)
+                connection.outputStream.close()
+
+                if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                    val response = connection.inputStream.bufferedReader().use { it.readText() }
+                    val jsonResponse = org.json.JSONObject(response)
+                    val audioContentBase64 = jsonResponse.getString("audioContent")
+                    
+                    val audioData = android.util.Base64.decode(audioContentBase64, android.util.Base64.DEFAULT)
+                    
+                    playPcmAudio(audioData)
+                } else {
+                    val error = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Erreur HTTP ${connection.responseCode}"
+                    Log.e("MangaReader", "Google TTS Error: $error")
+                    // Fallback local
+                    tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+                }
+            } catch (e: Exception) {
+                Log.e("MangaReader", "Exception Cloud TTS", e)
+                // Fallback local
+                tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
+            }
+        }.start()
+    }
+
+    private fun playPcmAudio(audioData: ByteArray) {
+        audioTrack?.stop()
+        audioTrack?.release()
+        
+        audioTrack = android.media.AudioTrack.Builder()
+            .setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                android.media.AudioFormat.Builder()
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(24000)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(audioData.size)
+            .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+            .build()
+            
+        audioTrack?.write(audioData, 0, audioData.size)
+        audioTrack?.play()
     }
 
     override fun onInterrupt() {}
