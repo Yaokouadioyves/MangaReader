@@ -50,15 +50,21 @@ class MainActivity : AppCompatActivity() {
         })
 
         btnStart.setOnClickListener {
-            val intent = Intent(this, MangaReaderService::class.java)
-            startService(intent)
-            Toast.makeText(this, "Service démarré", Toast.LENGTH_SHORT).show()
+            val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+            val isEnabled = enabledServices?.contains(packageName) == true
+
+            if (!isEnabled) {
+                Toast.makeText(this, "Veuillez d'abord activer l'accessibilité pour MangaReader", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } else {
+                sharedPref.edit().putBoolean(KEY_OCR_ENABLED, true).apply()
+                Toast.makeText(this, "Zone de lecture affichée", Toast.LENGTH_SHORT).show()
+            }
         }
 
         btnStop.setOnClickListener {
-            val intent = Intent(this, MangaReaderService::class.java)
-            stopService(intent)
-            Toast.makeText(this, "Service arrêté", Toast.LENGTH_SHORT).show()
+            sharedPref.edit().putBoolean(KEY_OCR_ENABLED, false).apply()
+            Toast.makeText(this, "Zone de lecture masquée", Toast.LENGTH_SHORT).show()
         }
 
         btnColor.setOnClickListener {
