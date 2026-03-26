@@ -250,12 +250,20 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, 
     /** Parle uniquement si le texte n'est pas identique au dernier énoncé récemment. */
     private fun speakIfNotDuplicate(text: String) {
         val now = System.currentTimeMillis()
-        if (lastSpokenText == text && now - lastSpokenTime < REPEAT_DELAY_MS) {
-            // Ignorer la répétition immédiate
+        
+        // Vérifie si le texte est très similaire ou inclus pour éviter de bégayer quand la zone bouge très peu
+        val isDuplicate = lastSpokenText != null && 
+                          (text.contains(lastSpokenText!!) || lastSpokenText!!.contains(text) || text == lastSpokenText)
+        
+        if (isDuplicate && (now - lastSpokenTime) < 5000) {
+            // Ignorer la répétition si on a lu (presque) la même chose il y a moins de 5 secondes
             return
         }
+        
         lastSpokenText = text
         lastSpokenTime = now
+        
+        // Utilisation des ponctuations ajoutées au prétraitement pour forcer des pauses naturelles par le TTS
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "manga_reader")
     }
 
