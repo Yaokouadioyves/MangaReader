@@ -1,8 +1,12 @@
 package com.example.mangareader
+
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityService.TakeScreenshotCallback
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
 import android.speech.tts.TextToSpeech
@@ -21,7 +25,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.Locale
 import kotlin.math.max
 
-class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
+class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener, SharedPreferences.OnSharedPreferenceChangeListener {
     private var tts: TextToSpeech? = null
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var lastScrollTime = 0L
@@ -30,12 +34,21 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
     private var overlayView: View? = null
     private var readingZone: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
+    
+    private lateinit var sharedPref: SharedPreferences
+    private val PREF_NAME = "mangareader_prefs"
+    private val KEY_COLOR = "rect_color"
+    private val KEY_ALPHA = "rect_alpha"
+    private val KEY_OCR_ENABLED = "ocr_enabled"
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         tts = TextToSpeech(this, this)
+        sharedPref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        sharedPref.registerOnSharedPreferenceChangeListener(this)
         Log.d("MangaReader", "Service Connecté")
         setupOverlay()
+        updateOverlayVisibility()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -60,6 +73,14 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
 
         readingZone = overlayView?.findViewById(R.id.reading_zone)
         val resizeHandle = overlayView?.findViewById<View>(R.id.resize_handle)
+        val closeHandle = overlayView?.findViewById<View>(R.id.close_handle)
+        
+        applyColorAndAlpha()
+
+        closeHandle?.setOnClickListener {
+            sharedPref.edit().putBoolean(KEY_OCR_ENABLED, false).apply()
+            updateOverlayVisibility()
+        }
 
         // Déplacement
         readingZone?.setOnTouchListener(object : View.OnTouchListener {
@@ -113,7 +134,6 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
                         params?.height = newHeight
                         readingZone?.layoutParams = params
 
-                        // Assurer que le overlay enveloppe la vue redimensionnée
                         windowManager?.updateViewLayout(overlayView, layoutParams)
                         return true
                     }
@@ -122,11 +142,33 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
             }
         })
     }
+    
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
+        if (key == KEY_COLOR || key == KEY_ALPHA) {
+            applyColorAndAlpha()
+        } else if (key == KEY_OCR_ENABLED) {
+            updateOverlayVisibility()
+        }
+    }
+    
+    private fun updateOverlayVisibility() {
+        val isEnabled = sharedPref.getBoolean(KEY_OCR_ENABLED, true)
+        overlayView?.visibility = if (isEnabled) View.VISIBLE else View.GONE
+    }
+    
+    private fun applyColorAndAlpha() {
+        val color = sharedPref.getInt(KEY_COLOR, Color.RED)
+        val alpha = sharedPref.getInt(KEY_ALPHA, 180)
+        val argb = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+        readingZone?.setBackgroundColor(argb)
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        if (!sharedPref.getBoolean(KEY_OCR_ENABLED, true)) return
+        
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             val currentTime = System.currentTimeMillis()
-            if (currentTime - lastScrollTime > 2000) { // 2 seconds debounce
+            if (currentTime - lastScrollTime > 2000) { 
                 lastScrollTime = currentTime
                 captureAndRead()
             }
@@ -135,16 +177,16 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
 
     private fun captureAndRead() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Cacher temporairement le rectangle rouge pour la capture
             overlayView?.visibility = View.INVISIBLE
             
             takeScreenshot(Display.DEFAULT_DISPLAY, applicationContext.mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshotResult: ScreenshotResult) {
-                    overlayView?.visibility = View.VISIBLE
+                    if (sharedPref.getBoolean(KEY_OCR_ENABLED, true)) {
+                        overlayView?.visibility = View.VISIBLE
+                    }
                     val fullBitmap = Bitmap.wrapHardwareBuffer(screenshotResult.hardwareBuffer, screenshotResult.colorSpace)
                     if (fullBitmap != null) {
                         try {
-                            // Extraire la zone correspondante au rectangle (x, y, largeur, hauteur)
                             val x = layoutParams?.x ?: 0
                             val y = layoutParams?.y ?: 0
                             val w = readingZone?.width ?: fullBitmap.width
@@ -161,12 +203,14 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
                             }
                         } catch (e: Exception) {
                             Log.e("MangaReader", "Erreur de crop : ${e.message}")
-                            processImage(fullBitmap) // Fallback sur toute l'image
+                            processImage(fullBitmap)
                         }
                     }
                 }
                 override fun onFailure(errorCode: Int) {
-                    overlayView?.visibility = View.VISIBLE
+                    if (sharedPref.getBoolean(KEY_OCR_ENABLED, true)) {
+                        overlayView?.visibility = View.VISIBLE
+                    }
                 }
             })
         }
@@ -188,6 +232,9 @@ class MangaReaderService : AccessibilityService(), TextToSpeech.OnInitListener {
     }
     
     override fun onDestroy() {
+        if (::sharedPref.isInitialized) {
+            sharedPref.unregisterOnSharedPreferenceChangeListener(this)
+        }
         if (overlayView != null) {
             windowManager?.removeView(overlayView)
         }

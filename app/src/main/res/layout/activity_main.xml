@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <Button
+        android:id="@+id/btnStartService"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Démarrer la lecture" />
+
+    <Button
+        android:id="@+id/btnStopService"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Arrêter la lecture" />
+
+    <SeekBar
+        android:id="@+id/seekBarAlpha"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:max="255"
+        android:progress="180" />
+
+    <TextView
+        android:id="@+id/tvAlphaValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Transparence: 180/255"
+        android:gravity="center" />
+
+    <Button
+        android:id="@+id/btnChangeColor"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Changer la couleur du rectangle" />
+
+</LinearLayout>

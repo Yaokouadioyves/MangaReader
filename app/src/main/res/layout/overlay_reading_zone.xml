@@ -18,4 +18,14 @@
         android:background="#AA000000"
         android:contentDescription="Redimensionner" />
 
+    <ImageView
+        android:id="@+id/close_handle"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:layout_gravity="top|start"
+        android:padding="4dp"
+        android:background="#AA000000"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        android:contentDescription="Fermer" />
+
 </FrameLayout>
