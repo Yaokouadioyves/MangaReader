@@ -34,6 +34,7 @@ import java.io.IOException
 import java.util.Locale
 import kotlin.math.max
 import org.json.JSONObject
+import org.json.JSONArray
 
 class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
     private var sharedPref: SharedPreferences? = null
@@ -302,7 +303,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
                 configObj.put("speechConfig", speechConfigObj)
                 jsonBody.put("generationConfig", configObj)
 
-                val outputBytes = jsonBody.toString().getBytes(Charsets.UTF_8)
+                val outputBytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
                 connection.outputStream.write(outputBytes)
                 connection.outputStream.close()
 
