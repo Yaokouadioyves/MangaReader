@@ -341,9 +341,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     override fun onInterrupt() {}
     
     override fun onDestroy() {
-        if (::sharedPref.isInitialized) {
-            sharedPref?.unregisterOnSharedPreferenceChangeListener(this)
-        }
+        sharedPref?.unregisterOnSharedPreferenceChangeListener(this)
         if (overlayView != null) {
             windowManager?.removeView(overlayView)
         }
