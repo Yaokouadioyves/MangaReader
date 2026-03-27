@@ -31,6 +31,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlin.math.max
 import org.json.JSONObject
@@ -44,9 +45,6 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     private val KEY_OCR_ENABLED = "ocr_enabled"
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val GEMINI_API_KEY = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
-    private val REPEAT_DELAY_MS = 5000 // 5 seconds to avoid repetition
-    private var lastSpokenText: String? = null
-    private var lastSpokenTime: Long = 0L
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
@@ -253,22 +251,8 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
         return cleaned.trim()
     }
 
-    /** Parle uniquement si le texte n'est pas identique au dernier énoncé récemment. */
+    /** Parle toujours le texte fourni (pas de filtrage anti‑bégaiement). */
     private fun speakIfNotDuplicate(text: String) {
-        val now = System.currentTimeMillis()
-        
-        // Vérifie si le texte est très similaire ou inclus pour éviter de bégayer quand la zone bouge très peu
-        val isDuplicate = lastSpokenText != null && 
-                          (text.contains(lastSpokenText!!) || lastSpokenText!!.contains(text) || text == lastSpokenText)
-        
-        if (isDuplicate && (now - lastSpokenTime) < REPEAT_DELAY_MS) {
-            // Ignorer la répétition si on a lu (presque) la même chose il y a moins de 5 secondes
-            return
-        }
-        
-        lastSpokenText = text
-        lastSpokenTime = now
-        
         speakWithGemini(text)
     }
 
