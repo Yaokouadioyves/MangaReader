@@ -44,6 +44,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     private val KEY_ALPHA = "rect_alpha"
     private val KEY_OCR_ENABLED = "ocr_enabled"
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private var closeHandle: View? = null
     private val GEMINI_API_KEY = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
 
     private var windowManager: WindowManager? = null
@@ -82,7 +83,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
 
         readingZone = overlayView?.findViewById(R.id.reading_zone)
         val resizeHandle = overlayView?.findViewById<View>(R.id.resize_handle)
-        val closeHandle = overlayView?.findViewById<View>(R.id.close_handle)
+        closeHandle = overlayView?.findViewById(R.id.close_handle) as View
         
         applyColorAndAlpha()
 
@@ -187,11 +188,13 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     private fun captureAndRead() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             overlayView?.visibility = View.INVISIBLE
+            closeHandle?.visibility = View.INVISIBLE
             
             takeScreenshot(Display.DEFAULT_DISPLAY, applicationContext.mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(screenshotResult: ScreenshotResult) {
                     if (sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true) {
                         overlayView?.visibility = View.VISIBLE
+                        closeHandle?.visibility = View.VISIBLE
                     }
                     val fullBitmap = Bitmap.wrapHardwareBuffer(screenshotResult.hardwareBuffer, screenshotResult.colorSpace)
                     if (fullBitmap != null) {
@@ -219,6 +222,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
                 override fun onFailure(errorCode: Int) {
                     if (sharedPref?.getBoolean(KEY_OCR_ENABLED, true) ?: true) {
                         overlayView?.visibility = View.VISIBLE
+                        closeHandle?.visibility = View.VISIBLE
                     }
                 }
             })
@@ -269,6 +273,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
                 
                 val inputObj = JSONObject()
                 inputObj.put("text", text)
+                inputObj.put("prompt", "Lis le texte suivant avec fluidité et une intonation de narrateur.")
                 jsonBody.put("input", inputObj)
                 
                 val voiceObj = JSONObject()
