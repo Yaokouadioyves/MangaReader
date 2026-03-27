@@ -256,10 +256,10 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
         speakWithGemini(text)
     }
 
-    private fun speakWithGemini(text: String) {
+        private fun speakWithGemini(text: String) {
         Thread {
             try {
-                val url = java.net.URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=$GEMINI_API_KEY")
+                val url = java.net.URL("https://texttospeech.googleapis.com/v1/text:synthesize?key=$GEMINI_API_KEY")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -273,110 +273,63 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
                 
                 val voiceObj = JSONObject()
                 voiceObj.put("languageCode", "fr-FR")
-                voiceObj.put("name", "Zephyr") // Using a placeholder voice name; actual voice selection may vary per model
+                voiceObj.put("name", "Aoede") // Voix Gemini multilingue
+                voiceObj.put("model_name", "gemini-2.5-flash-tts")
                 jsonBody.put("voice", voiceObj)
                 
-                val configObj = JSONObject()
-                configObj.put("responseModalities", JSONArray().put("AUDIO"))
-                val speechConfigObj = JSONObject()
-                val voiceConfigObj = JSONObject()
-                val prebuiltVoiceConfigObj = JSONObject()
-                prebuiltVoiceConfigObj.put("voiceName", "Zephyr")
-                voiceConfigObj.put("prebuiltVoiceConfig", prebuiltVoiceConfigObj)
-                speechConfigObj.put("voiceConfig", voiceConfigObj)
-                configObj.put("speechConfig", speechConfigObj)
-                jsonBody.put("generationConfig", configObj)
+                val audioConfigObj = JSONObject()
+                audioConfigObj.put("audioEncoding", "LINEAR16")
+                audioConfigObj.put("sampleRateHertz", 24000)
+                jsonBody.put("audioConfig", audioConfigObj)
 
-                val outputBytes = jsonBody.toString().toByteArray(Charsets.UTF_8)
+                val outputBytes = jsonBody.toString().toByteArray(StandardCharsets.UTF_8)
                 connection.outputStream.write(outputBytes)
                 connection.outputStream.close()
 
                 if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
                     val response = connection.inputStream.bufferedReader().use { it.readText() }
                     val jsonResponse = JSONObject(response)
-                    // Parse response
-                    val candidates = jsonResponse.getJSONArray("candidates")
-                    if (candidates.length() > 0) {
-                        val content = candidates.getJSONObject(0).getJSONObject("content")
-                        val parts = content.getJSONArray("parts")
-                        if (parts.length() > 0) {
-                            val part = parts.getJSONObject(0)
-                            if (part.has("inlineData")) {
-                                val inlineData = part.getJSONObject("inlineData")
-                                val audioBase64 = inlineData.getString("data")
-                                val mimeType = inlineData.getString("mimeType")
-                                Log.d("MangaReader", "Received audio mimeType: $mimeType")
-                                val audioData = android.util.Base64.decode(audioBase64, android.util.Base64.DEFAULT)
-                                // Play audio based on mimeType
-                                if (mimeType.contains("wav") || mimeType.contains("L16")) {
-                                    playWavAudio(audioData)
-                                } else if (mimeType.contains("mp3")) {
-                                    playMp3Audio(audioData)
-                                } else {
-                                    // Default to WAV
-                                    playWavAudio(audioData)
-                                }
-                            } else {
-                                Log.e("MangaReader", "No inlineData in response")
-                            }
-                        }
-                    }
+                    val audioContentBase64 = jsonResponse.getString("audioContent")
+                    
+                    val audioData = android.util.Base64.decode(audioContentBase64, android.util.Base64.DEFAULT)
+                    
+                    playPcmAudio(audioData)
                 } else {
                     val error = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "Erreur HTTP ${connection.responseCode}"
-                    Log.e("MangaReader", "Gemini TTS Error: $error")
-                    // No fallback as per user request
+                    Log.e("MangaReader", "Cloud TTS Error: $error")
                 }
             } catch (e: Exception) {
-                Log.e("MangaReader", "Exception in Gemini TTS", e)
-                // No fallback
+                Log.e("MangaReader", "Exception in Cloud TTS", e)
             }
         }.start()
     }
 
-    private fun playWavAudio(audioData: ByteArray) {
-        try {
-            val tempFile = File.createTempFile("gemini_tts_", ".wav", cacheDir)
-            tempFile.outputStream().use { it.write(audioData) }
-            val mediaPlayer = MediaPlayer().apply {
-                setDataSource(tempFile.absolutePath)
-                prepare()
-                start()
-                setOnCompletionListener {
-                    release()
-                    tempFile.delete()
-                }
-                setOnErrorListener { _, _, _ ->
-                    release()
-                    tempFile.delete()
-                    true
-                }
-            }
-        } catch (e: IOException) {
-            Log.e("MangaReader", "Error playing WAV audio", e)
-        }
-    }
+    private var audioTrack: AudioTrack? = null
 
-    private fun playMp3Audio(audioData: ByteArray) {
-        try {
-            val tempFile = File.createTempFile("gemini_tts_", ".mp3", cacheDir)
-            tempFile.outputStream().use { it.write(audioData) }
-            val mediaPlayer = MediaPlayer().apply {
-                setDataSource(tempFile.absolutePath)
-                prepare()
-                start()
-                setOnCompletionListener {
-                    release()
-                    tempFile.delete()
-                }
-                setOnErrorListener { _, _, _ ->
-                    release()
-                    tempFile.delete()
-                    true
-                }
-            }
-        } catch (e: IOException) {
-            Log.e("MangaReader", "Error playing MP3 audio", e)
-        }
+    private fun playPcmAudio(audioData: ByteArray) {
+        audioTrack?.stop()
+        audioTrack?.release()
+        
+        audioTrack = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(24000)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(audioData.size)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+            
+        audioTrack?.write(audioData, 0, audioData.size)
+        audioTrack?.play()
     }
 
     override fun onInterrupt() {}
