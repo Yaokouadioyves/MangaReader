@@ -45,6 +45,7 @@ class MangaReaderService : AccessibilityService(), SharedPreferences.OnSharedPre
     private val KEY_OCR_ENABLED = "ocr_enabled"
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private var closeHandle: View? = null
+    private var lastSpokenTime: Long = 0
     private val GEMINI_API_KEY = "AIzaSyDaCuKBJnoOuPvok7X6-X-r-1uK4V95EVI"
 
     private var windowManager: WindowManager? = null
